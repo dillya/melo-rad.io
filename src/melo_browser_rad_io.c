@@ -33,12 +33,21 @@
 static MeloBrowserInfo melo_browser_rad_io_info = {
   .name = "Browse rad.io",
   .description = "Navigate though all radios from rad.io / radio.de / radio.fr",
+  /* Search feature */
+  .search_support = TRUE,
+  .search_input_text = "Type a radio name...",
+  .search_button_text = "Go",
 };
 
 static const MeloBrowserInfo *melo_browser_rad_io_get_info (
                                                           MeloBrowser *browser);
 static MeloBrowserList *melo_browser_rad_io_get_list (MeloBrowser *browser,
                                                   const gchar *path,
+                                                  gint offset, gint count,
+                                                  MeloBrowserTagsMode tags_mode,
+                                                  MeloTagsFields tags_fields);
+static MeloBrowserList *melo_browser_rad_io_search (MeloBrowser *browser,
+                                                  const gchar *input,
                                                   gint offset, gint count,
                                                   MeloBrowserTagsMode tags_mode,
                                                   MeloTagsFields tags_fields);
@@ -90,6 +99,7 @@ melo_browser_rad_io_class_init (MeloBrowserRadIoClass *klass)
 
   bclass->get_info = melo_browser_rad_io_get_info;
   bclass->get_list = melo_browser_rad_io_get_list;
+  bclass->search = melo_browser_rad_io_search;
   bclass->play = melo_browser_rad_io_play;
 
   /* Add custom finalize() function */
@@ -182,6 +192,58 @@ melo_browser_rad_io_get_json_array (MeloBrowserRadIo *brad, const gchar *url)
   return melo_browser_rad_io_get_json (brad, url, JSON_NODE_ARRAY);
 }
 
+static gboolean
+melo_browser_rad_io_gen_station_list (MeloBrowserList *list, JsonObject *obj)
+{
+  MeloBrowserItem *item;
+  JsonArray *array;
+  gint len, i;
+
+  /* Check categories is available */
+  if (!json_object_has_member (obj, "categories"))
+    return FALSE;
+
+  /* Get categories */
+  array = json_object_get_array_member (obj, "categories");
+  if (array && json_array_get_length (array) >= 1) {
+    JsonObject *o;
+
+    /* Get matches */
+    o = json_array_get_object_element (array, 0);
+    if (o && json_object_has_member (o, "matches")) {
+      array = json_object_get_array_member (o, "matches");
+      len = json_array_get_length (array);
+      for (i = 0; i < len; i++) {
+        const gchar *full_name;
+        gchar name[10];
+        JsonObject *n;
+        gint id;
+
+        /* Get next station */
+        o = json_array_get_object_element (array, i);
+        if (!o)
+          continue;
+
+        /* Get name and full name */
+        id = json_object_get_int_member (o, "id");
+        g_snprintf (name, 10, "%d", id);
+        n = json_object_get_object_member (o, "name");
+        if (n)
+          full_name = json_object_get_string_member (n, "value");
+
+        /* Create browser item */
+        item = melo_browser_item_new (name, "radio");
+        if (item) {
+          item->full_name = g_strdup (full_name);
+          list->items = g_list_prepend (list->items, item);
+        }
+      }
+    }
+  }
+
+  return TRUE;
+}
+
 static MeloBrowserList *
 melo_browser_rad_io_get_list (MeloBrowser *browser, const gchar *path,
                               gint offset, gint count,
@@ -249,45 +311,8 @@ melo_browser_rad_io_get_list (MeloBrowser *browser, const gchar *path,
 
     /* Parse response */
     if (obj) {
-      JsonArray *array;
-
-      /* Get categories */
-      array = json_object_get_array_member (obj, "categories");
-      if (array && json_array_get_length (array) >= 1) {
-        JsonObject *o;
-
-        /* Get matches */
-        o = json_array_get_object_element (array, 0);
-        if (o && json_object_has_member (o, "matches")) {
-          array = json_object_get_array_member (o, "matches");
-          len = json_array_get_length (array);
-          for (i = 0; i < len; i++) {
-            const gchar *full_name;
-            gchar name[10];
-            JsonObject *n;
-            gint id;
-
-            /* Get next station */
-            o = json_array_get_object_element (array, i);
-            if (!o)
-              continue;
-
-            /* Get name and full name */
-            id = json_object_get_int_member (o, "id");
-            g_snprintf (name, 10, "%d", id);
-            n = json_object_get_object_member (o, "name");
-            if (n)
-              full_name = json_object_get_string_member (n, "value");
-
-            /* Create browser item */
-            item = melo_browser_item_new (name, "radio");
-            if (item) {
-              item->full_name = g_strdup (full_name);
-              list->items = g_list_prepend (list->items, item);
-            }
-          }
-        }
-      }
+      /* Generate station list */
+      melo_browser_rad_io_gen_station_list (list, obj);
 
       /* Free object */
       json_object_unref (obj);
@@ -338,6 +363,58 @@ melo_browser_rad_io_get_list (MeloBrowser *browser, const gchar *path,
 
   /* Free path parts */
   g_strfreev (parts);
+
+  return list;
+}
+
+static MeloBrowserList *
+melo_browser_rad_io_search (MeloBrowser *browser, const gchar *input,
+                            gint offset, gint count,
+                            MeloBrowserTagsMode tags_mode,
+                            MeloTagsFields tags_fields)
+{
+  MeloBrowserRadIo *brad = MELO_BROWSER_RAD_IO (browser);
+  MeloBrowserList *list;
+  JsonObject *obj;
+  gchar *url, *query;
+  gint page;
+  gint len;
+  gint i;
+
+  /* Create browser list */
+  list = melo_browser_list_new ("");
+  if (!list)
+    return NULL;
+
+  /* Generate query string */
+  query = g_strdup (input);
+  len = strlen (query);
+  for (i = 0; i < len; i++)
+    if (query[i] == ' ')
+      query[i] = '+';
+
+  /* Generate page number from offset / count */
+  page = (offset / count) + 1;
+
+  /* Get stations */
+  url = g_strdup_printf (MELO_BROWSER_RAD_IO_URL "stationsonly?query=%s"
+                         "&sizeperpage=%d&pageindex=%d",
+                         query, count, page);
+  obj = melo_browser_rad_io_get_json_object (brad, url);
+  g_free (query);
+  g_free (url);
+
+  /* Parse response */
+  if (obj) {
+    /* Generate station list */
+    melo_browser_rad_io_gen_station_list (list, obj);
+
+    /* Free object */
+    json_object_unref (obj);
+  }
+
+  /* Reverse list */
+  list->items = g_list_reverse (list->items);
 
   return list;
 }
