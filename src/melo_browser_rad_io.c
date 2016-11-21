@@ -302,7 +302,7 @@ melo_browser_rad_io_get_list (MeloBrowser *browser, const gchar *path,
 
     /* Get stations list */
     url = g_strdup_printf (MELO_BROWSER_RAD_IO_URL "stationsby%s?%s=%s"
-                           "&sizeperpage=%d&pageindex=%d",
+                           "&sizeperpage=%d&pageindex=%d&sorttype=STATION_NAME",
                            parts[0], parts[0], parts[1], count, page);
 
     /* Get object from URL */
@@ -398,7 +398,7 @@ melo_browser_rad_io_search (MeloBrowser *browser, const gchar *input,
 
   /* Get stations */
   url = g_strdup_printf (MELO_BROWSER_RAD_IO_URL "stationsonly?query=%s"
-                         "&sizeperpage=%d&pageindex=%d",
+                         "&sizeperpage=%d&pageindex=%d&sorttype=STATION_NAME",
                          query, count, page);
   obj = melo_browser_rad_io_get_json_object (brad, url);
   g_free (query);
