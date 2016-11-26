@@ -29,6 +29,10 @@
 #define MELO_BROWSER_RAD_IO_URL "https://api.radio.net/info/v2/search/"
 #define MELO_BROWSER_RAD_IO_USER_AGENT "rad.io for Melo (Android API)"
 
+#define MELO_BROWSER_RAD_IO_COVER_URL \
+    "http://static.radio.net/images/broadcasts/"
+#define MELO_BROWSER_RAD_IO_COVER_TYPE "image/png"
+
 /* rad.io browser info */
 static MeloBrowserInfo melo_browser_rad_io_info = {
   .name = "Browse rad.io",
@@ -53,6 +57,10 @@ static MeloBrowserList *melo_browser_rad_io_search (MeloBrowser *browser,
                                                   MeloTagsFields tags_fields);
 static gboolean melo_browser_rad_io_play (MeloBrowser *browser,
                                            const gchar *path);
+
+static gboolean melo_browser_rad_io_get_cover (MeloBrowser *browser,
+                                               const gchar *path, GBytes **data,
+                                               gchar **type);
 
 typedef struct {
   const gchar *name;
@@ -101,6 +109,8 @@ melo_browser_rad_io_class_init (MeloBrowserRadIoClass *klass)
   bclass->get_list = melo_browser_rad_io_get_list;
   bclass->search = melo_browser_rad_io_search;
   bclass->play = melo_browser_rad_io_play;
+
+  bclass->get_cover = melo_browser_rad_io_get_cover;
 
   /* Add custom finalize() function */
   oclass->finalize = melo_browser_rad_io_finalize;
@@ -192,8 +202,76 @@ melo_browser_rad_io_get_json_array (MeloBrowserRadIo *brad, const gchar *url)
   return melo_browser_rad_io_get_json (brad, url, JSON_NODE_ARRAY);
 }
 
+static MeloTags *
+melo_browser_rad_io_gen_tags (MeloBrowserRadIo *brad, JsonObject *obj,
+                              MeloTagsFields fields)
+{
+  const gchar *logo = NULL;
+  MeloTags *tags;
+
+  /* Generate tags */
+  tags = melo_tags_new ();
+  if (!tags)
+    return NULL;
+
+  /* Get biggest logo first */
+  if (json_object_has_member (obj, "logo300x300"))
+    logo = json_object_get_string_member (obj, "logo300x300");
+  else if (json_object_has_member (obj, "logo175x175"))
+    logo = json_object_get_string_member (obj, "logo175x175");
+  else if (json_object_has_member (obj, "logo100x100"))
+    logo = json_object_get_string_member (obj, "logo100x100");
+  else if (json_object_has_member (obj, "logo44x44"))
+    logo = json_object_get_string_member (obj, "logo44x44");
+
+  /* Add cover to tags */
+  if (logo) {
+    /* Add cover URL */
+    if (fields & MELO_TAGS_FIELDS_COVER_URL) {
+      const gchar *path;
+
+      /* Get path from URL */
+      path = strstr (logo, MELO_BROWSER_RAD_IO_COVER_URL);
+      if (path)
+        path += sizeof (MELO_BROWSER_RAD_IO_COVER_URL) - 1;
+
+      /* Set cover URL */
+      melo_tags_set_cover_url (tags, G_OBJECT (brad), path,
+                               MELO_BROWSER_RAD_IO_COVER_TYPE);
+    }
+
+    /* Add cover to tags */
+    if (fields & MELO_TAGS_FIELDS_COVER) {
+      SoupMessage *msg;
+
+      /* Prepare HTTP request */
+      msg = soup_message_new ("GET", logo);
+      if (msg) {
+        /* Download logo */
+        if (soup_session_send_message (brad->priv->session, msg) == 200) {
+          GBytes *cover = NULL;
+
+          /* Create cover */
+          g_object_get (msg, "response-body-data", &cover, NULL);
+
+          /* Add cover to tags */
+          melo_tags_take_cover (tags, cover, MELO_BROWSER_RAD_IO_COVER_TYPE);
+        }
+
+        /* Free message */
+        g_object_unref (msg);
+      }
+    }
+  }
+
+  return tags;
+}
+
 static gboolean
-melo_browser_rad_io_gen_station_list (MeloBrowserList *list, JsonObject *obj)
+melo_browser_rad_io_gen_station_list (MeloBrowserRadIo *brad,
+                                      MeloBrowserList *list, JsonObject *obj,
+                                      MeloBrowserTagsMode tags_mode,
+                                      MeloTagsFields tags_fields)
 {
   MeloBrowserItem *item;
   JsonArray *array;
@@ -234,7 +312,14 @@ melo_browser_rad_io_gen_station_list (MeloBrowserList *list, JsonObject *obj)
         /* Create browser item */
         item = melo_browser_item_new (name, "radio");
         if (item) {
+          /* Set full name with station name */
           item->full_name = g_strdup (full_name);
+
+          /* Generate tags for item */
+          if (tags_mode != MELO_BROWSER_TAGS_MODE_NONE)
+            item->tags = melo_browser_rad_io_gen_tags (brad, o, tags_fields);
+
+          /* Add item to list */
           list->items = g_list_prepend (list->items, item);
         }
       }
@@ -312,7 +397,8 @@ melo_browser_rad_io_get_list (MeloBrowser *browser, const gchar *path,
     /* Parse response */
     if (obj) {
       /* Generate station list */
-      melo_browser_rad_io_gen_station_list (list, obj);
+      melo_browser_rad_io_gen_station_list (brad, list, obj, tags_mode,
+                                            tags_fields);
 
       /* Free object */
       json_object_unref (obj);
@@ -407,7 +493,8 @@ melo_browser_rad_io_search (MeloBrowser *browser, const gchar *input,
   /* Parse response */
   if (obj) {
     /* Generate station list */
-    melo_browser_rad_io_gen_station_list (list, obj);
+    melo_browser_rad_io_gen_station_list (brad, list, obj, tags_mode,
+                                          tags_fields);
 
     /* Free object */
     json_object_unref (obj);
@@ -425,6 +512,7 @@ melo_browser_rad_io_play (MeloBrowser *browser, const gchar *path)
   MeloBrowserRadIo *brad = MELO_BROWSER_RAD_IO (browser);
   const gchar *stream_url = NULL;
   const gchar *name = NULL;
+  MeloTags *tags;
   JsonObject *obj;
   JsonArray *urls;
   gchar *id, *url;
@@ -464,11 +552,47 @@ melo_browser_rad_io_play (MeloBrowser *browser, const gchar *path)
   /* Get radio name */
   name = json_object_get_string_member (obj, "name");
 
+  /* Generate tags */
+  tags = melo_browser_rad_io_gen_tags (brad, obj, MELO_TAGS_FIELDS_FULL);
+
   /* Play radio station */
-  melo_player_play (browser->player, stream_url, name, NULL, TRUE);
+  melo_player_play (browser->player, stream_url, name, tags, FALSE);
+  if (tags)
+    melo_tags_unref (tags);
 
   /* Free object */
   json_object_unref (obj);
+
+  return TRUE;
+}
+
+static gboolean
+melo_browser_rad_io_get_cover (MeloBrowser *browser, const gchar *path,
+                               GBytes **data, gchar **type)
+{
+  MeloBrowserRadIoPrivate *priv = (MELO_BROWSER_RAD_IO (browser))->priv;
+  SoupMessage *msg;
+  gchar *url;
+
+  /* Generate URL */
+  url = g_strdup_printf (MELO_BROWSER_RAD_IO_COVER_URL "%s", path);
+  if (url) {
+    /* Prepare HTTP request */
+    msg = soup_message_new ("GET", url);
+    if (msg) {
+      /* Download logo */
+      if (soup_session_send_message (priv->session, msg) == 200) {
+        g_object_get (msg, "response-body-data", data, NULL);
+        *type = g_strdup (MELO_BROWSER_RAD_IO_COVER_TYPE);
+      }
+
+      /* Free message */
+      g_object_unref (msg);
+    }
+
+    /* Free URL */
+    g_free (url);
+  }
 
   return TRUE;
 }
