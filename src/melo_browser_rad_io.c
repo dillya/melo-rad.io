@@ -48,11 +48,13 @@ static const MeloBrowserInfo *melo_browser_rad_io_get_info (
 static MeloBrowserList *melo_browser_rad_io_get_list (MeloBrowser *browser,
                                                   const gchar *path,
                                                   gint offset, gint count,
+                                                  const gchar *token,
                                                   MeloBrowserTagsMode tags_mode,
                                                   MeloTagsFields tags_fields);
 static MeloBrowserList *melo_browser_rad_io_search (MeloBrowser *browser,
                                                   const gchar *input,
                                                   gint offset, gint count,
+                                                  const gchar *token,
                                                   MeloBrowserTagsMode tags_mode,
                                                   MeloTagsFields tags_fields);
 static gboolean melo_browser_rad_io_play (MeloBrowser *browser,
@@ -331,7 +333,7 @@ melo_browser_rad_io_gen_station_list (MeloBrowserRadIo *brad,
 
 static MeloBrowserList *
 melo_browser_rad_io_get_list (MeloBrowser *browser, const gchar *path,
-                              gint offset, gint count,
+                              gint offset, gint count, const gchar *token,
                               MeloBrowserTagsMode tags_mode,
                               MeloTagsFields tags_fields)
 {
@@ -455,7 +457,7 @@ melo_browser_rad_io_get_list (MeloBrowser *browser, const gchar *path,
 
 static MeloBrowserList *
 melo_browser_rad_io_search (MeloBrowser *browser, const gchar *input,
-                            gint offset, gint count,
+                            gint offset, gint count, const gchar *token,
                             MeloBrowserTagsMode tags_mode,
                             MeloTagsFields tags_fields)
 {
