@@ -37,6 +37,7 @@
 static MeloBrowserInfo melo_browser_rad_io_info = {
   .name = "Browse rad.io",
   .description = "Navigate though all radios from rad.io / radio.de / radio.fr",
+  .tags_support = TRUE,
   /* Search feature */
   .search_support = TRUE,
   .search_input_text = "Type a radio name...",
@@ -57,6 +58,9 @@ static MeloBrowserList *melo_browser_rad_io_search (MeloBrowser *browser,
                                                   const gchar *token,
                                                   MeloBrowserTagsMode tags_mode,
                                                   MeloTagsFields tags_fields);
+static MeloTags *melo_browser_rad_io_get_tags (MeloBrowser *browser,
+                                               const gchar *path,
+                                               MeloTagsFields fields);
 static gboolean melo_browser_rad_io_play (MeloBrowser *browser,
                                            const gchar *path);
 
@@ -110,6 +114,7 @@ melo_browser_rad_io_class_init (MeloBrowserRadIoClass *klass)
   bclass->get_info = melo_browser_rad_io_get_info;
   bclass->get_list = melo_browser_rad_io_get_list;
   bclass->search = melo_browser_rad_io_search;
+  bclass->get_tags = melo_browser_rad_io_get_tags;
   bclass->play = melo_browser_rad_io_play;
 
   bclass->get_cover = melo_browser_rad_io_get_cover;
@@ -506,6 +511,35 @@ melo_browser_rad_io_search (MeloBrowser *browser, const gchar *input,
   list->items = g_list_reverse (list->items);
 
   return list;
+}
+
+static MeloTags *
+melo_browser_rad_io_get_tags (MeloBrowser *browser, const gchar *path,
+                              MeloTagsFields fields)
+{
+  MeloBrowserRadIo *brad = MELO_BROWSER_RAD_IO (browser);
+  MeloTags *tags = NULL;
+  JsonObject *obj;
+  gchar *id, *url;
+
+  /* Get radio id from path */
+  id = g_path_get_basename (path);
+  if (!id)
+    return FALSE;
+
+  /* Get station details */
+  url = g_strdup_printf (MELO_BROWSER_RAD_IO_URL "station?station=%s", id);
+  obj = melo_browser_rad_io_get_json_object (brad, url);
+  g_free (url);
+  g_free (id);
+
+  /* No response */
+  /* Generate tags from response */
+  if (obj)
+    tags = melo_browser_rad_io_gen_tags (brad, obj, MELO_TAGS_FIELDS_FULL);
+  json_object_unref (obj);
+
+  return tags;
 }
 
 static gboolean
