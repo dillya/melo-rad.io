@@ -535,9 +535,10 @@ melo_browser_rad_io_get_tags (MeloBrowser *browser, const gchar *path,
 
   /* No response */
   /* Generate tags from response */
-  if (obj)
+  if (obj) {
     tags = melo_browser_rad_io_gen_tags (brad, obj, MELO_TAGS_FIELDS_FULL);
-  json_object_unref (obj);
+    json_object_unref (obj);
+  }
 
   return tags;
 }
