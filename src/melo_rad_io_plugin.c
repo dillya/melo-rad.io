@@ -57,10 +57,7 @@ melo_rad_io_disable (void)
   return TRUE;
 }
 
-G_MODULE_EXPORT
-const MeloPlugin melo_plugin = {
-  .name = "rad.io",
-  .description = "rad.io / radio.de / radio.fr browser for Melo",
-  .enable = melo_rad_io_enable,
-  .disable = melo_rad_io_disable,
-};
+DECLARE_MELO_PLUGIN ("rad.io",
+                     "rad.io / radio.de / radio.fr browser for Melo",
+                     melo_rad_io_enable,
+                     melo_rad_io_disable);
