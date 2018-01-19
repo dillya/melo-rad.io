@@ -47,23 +47,17 @@ static MeloBrowserInfo melo_browser_rad_io_info = {
 static const MeloBrowserInfo *melo_browser_rad_io_get_info (
                                                           MeloBrowser *browser);
 static MeloBrowserList *melo_browser_rad_io_get_list (MeloBrowser *browser,
-                                                  const gchar *path,
-                                                  gint offset, gint count,
-                                                  const gchar *token,
-                                                  MeloBrowserTagsMode tags_mode,
-                                                  MeloTagsFields tags_fields);
+                                        const gchar *path,
+                                        const MeloBrowserGetListParams *params);
 static MeloBrowserList *melo_browser_rad_io_search (MeloBrowser *browser,
-                                                  const gchar *input,
-                                                  gint offset, gint count,
-                                                  const gchar *token,
-                                                  MeloBrowserTagsMode tags_mode,
-                                                  MeloTagsFields tags_fields);
+                                         const gchar *input,
+                                         const MeloBrowserSearchParams *params);
 static MeloTags *melo_browser_rad_io_get_tags (MeloBrowser *browser,
                                                const gchar *path,
                                                MeloTagsFields fields);
 static gboolean melo_browser_rad_io_play (MeloBrowser *browser,
-                                           const gchar *path);
-
+                                          const gchar *path,
+                                          const MeloBrowserPlayParams *params);
 static gboolean melo_browser_rad_io_get_cover (MeloBrowser *browser,
                                                const gchar *path, GBytes **data,
                                                gchar **type);
@@ -338,9 +332,7 @@ melo_browser_rad_io_gen_station_list (MeloBrowserRadIo *brad,
 
 static MeloBrowserList *
 melo_browser_rad_io_get_list (MeloBrowser *browser, const gchar *path,
-                              gint offset, gint count, const gchar *token,
-                              MeloBrowserTagsMode tags_mode,
-                              MeloTagsFields tags_fields)
+                              const MeloBrowserGetListParams *params)
 {
   MeloBrowserRadIo *brad = MELO_BROWSER_RAD_IO (browser);
   MeloBrowserList *list;
@@ -371,7 +363,7 @@ melo_browser_rad_io_get_list (MeloBrowser *browser, const gchar *path,
   }
 
   /* Generate page number from offset / count */
-  page = (offset / count) + 1;
+  page = (params->offset / params->count) + 1;
 
   /* Parse path */
   parts = g_strsplit (path + 1, "/", 3);
@@ -395,7 +387,7 @@ melo_browser_rad_io_get_list (MeloBrowser *browser, const gchar *path,
     /* Get stations list */
     url = g_strdup_printf (MELO_BROWSER_RAD_IO_URL "stationsby%s?%s=%s"
                            "&sizeperpage=%d&pageindex=%d&sorttype=STATION_NAME",
-                           parts[0], parts[0], parts[1], count, page);
+                           parts[0], parts[0], parts[1], params->count, page);
 
     /* Get object from URL */
     obj = melo_browser_rad_io_get_json_object (brad, url);
@@ -404,8 +396,8 @@ melo_browser_rad_io_get_list (MeloBrowser *browser, const gchar *path,
     /* Parse response */
     if (obj) {
       /* Generate station list */
-      melo_browser_rad_io_gen_station_list (brad, list, obj, tags_mode,
-                                            tags_fields);
+      melo_browser_rad_io_gen_station_list (brad, list, obj, params->tags_mode,
+                                            params->tags_fields);
 
       /* Free object */
       json_object_unref (obj);
@@ -423,9 +415,9 @@ melo_browser_rad_io_get_list (MeloBrowser *browser, const gchar *path,
     /* Parse response */
     if (array) {
       len = json_array_get_length (array);
-      if (offset + count < len)
-        len = offset + count;
-      for (i = offset; i < len; i++) {
+      if (params->offset + params->count < len)
+        len = params->offset + params->count;
+      for (i = params->offset; i < len; i++) {
         const gchar *name, *full_name;
         JsonObject *o;
 
@@ -462,9 +454,7 @@ melo_browser_rad_io_get_list (MeloBrowser *browser, const gchar *path,
 
 static MeloBrowserList *
 melo_browser_rad_io_search (MeloBrowser *browser, const gchar *input,
-                            gint offset, gint count, const gchar *token,
-                            MeloBrowserTagsMode tags_mode,
-                            MeloTagsFields tags_fields)
+                            const MeloBrowserSearchParams *params)
 {
   MeloBrowserRadIo *brad = MELO_BROWSER_RAD_IO (browser);
   MeloBrowserList *list;
@@ -487,12 +477,12 @@ melo_browser_rad_io_search (MeloBrowser *browser, const gchar *input,
       query[i] = '+';
 
   /* Generate page number from offset / count */
-  page = (offset / count) + 1;
+  page = (params->offset / params->count) + 1;
 
   /* Get stations */
   url = g_strdup_printf (MELO_BROWSER_RAD_IO_URL "stationsonly?query=%s"
                          "&sizeperpage=%d&pageindex=%d&sorttype=STATION_NAME",
-                         query, count, page);
+                         query, params->count, page);
   obj = melo_browser_rad_io_get_json_object (brad, url);
   g_free (query);
   g_free (url);
@@ -500,8 +490,8 @@ melo_browser_rad_io_search (MeloBrowser *browser, const gchar *input,
   /* Parse response */
   if (obj) {
     /* Generate station list */
-    melo_browser_rad_io_gen_station_list (brad, list, obj, tags_mode,
-                                          tags_fields);
+    melo_browser_rad_io_gen_station_list (brad, list, obj, params->tags_mode,
+                                          params->tags_fields);
 
     /* Free object */
     json_object_unref (obj);
@@ -544,7 +534,8 @@ melo_browser_rad_io_get_tags (MeloBrowser *browser, const gchar *path,
 }
 
 static gboolean
-melo_browser_rad_io_play (MeloBrowser *browser, const gchar *path)
+melo_browser_rad_io_play (MeloBrowser *browser, const gchar *path,
+                          const MeloBrowserPlayParams *params)
 {
   MeloBrowserRadIo *brad = MELO_BROWSER_RAD_IO (browser);
   const gchar *stream_url = NULL;
