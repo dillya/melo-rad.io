@@ -55,16 +55,17 @@ static MeloBrowserList *melo_browser_rad_io_search (MeloBrowser *browser,
 static MeloTags *melo_browser_rad_io_get_tags (MeloBrowser *browser,
                                                const gchar *path,
                                                MeloTagsFields fields);
-static gboolean melo_browser_rad_io_play (MeloBrowser *browser,
-                                          const gchar *path,
-                                          const MeloBrowserPlayParams *params);
+static gboolean melo_browser_rad_io_action (MeloBrowser *browser,
+                                         const gchar *path,
+                                         MeloBrowserItemAction action,
+                                         const MeloBrowserActionParams *params);
 static gboolean melo_browser_rad_io_get_cover (MeloBrowser *browser,
                                                const gchar *path, GBytes **data,
                                                gchar **type);
 
 typedef struct {
+  const gchar *id;
   const gchar *name;
-  const gchar *full_name;
 } MeloBrowserRadIoCategory;
 
 const static MeloBrowserRadIoCategory melo_browser_rad_io_cats[] = {
@@ -109,7 +110,7 @@ melo_browser_rad_io_class_init (MeloBrowserRadIoClass *klass)
   bclass->get_list = melo_browser_rad_io_get_list;
   bclass->search = melo_browser_rad_io_search;
   bclass->get_tags = melo_browser_rad_io_get_tags;
-  bclass->play = melo_browser_rad_io_play;
+  bclass->action = melo_browser_rad_io_action;
 
   bclass->get_cover = melo_browser_rad_io_get_cover;
 
@@ -293,28 +294,28 @@ melo_browser_rad_io_gen_station_list (MeloBrowserRadIo *brad,
       array = json_object_get_array_member (o, "matches");
       len = json_array_get_length (array);
       for (i = 0; i < len; i++) {
-        const gchar *full_name;
-        gchar name[10];
+        const gchar *name;
+        gchar id[10];
         JsonObject *n;
-        gint id;
+        gint iteid;
 
         /* Get next station */
         o = json_array_get_object_element (array, i);
         if (!o)
           continue;
 
-        /* Get name and full name */
-        id = json_object_get_int_member (o, "id");
-        g_snprintf (name, 10, "%d", id);
+        /* Get ID and name */
+        g_snprintf (id, 10, "%d", json_object_get_int_member (o, "id"));
         n = json_object_get_object_member (o, "name");
         if (n)
-          full_name = json_object_get_string_member (n, "value");
+          name = json_object_get_string_member (n, "value");
 
         /* Create browser item */
-        item = melo_browser_item_new (name, "radio");
+        item = melo_browser_item_new (id, MELO_BROWSER_ITEM_TYPE_MEDIA);
         if (item) {
-          /* Set full name with station name */
-          item->full_name = g_strdup (full_name);
+          /* Set name with station name */
+          item->name = g_strdup (name);
+          item->actions = MELO_BROWSER_ITEM_ACTION_FIELDS_PLAY;
 
           /* Generate tags for item */
           if (tags_mode != MELO_BROWSER_TAGS_MODE_NONE)
@@ -352,10 +353,10 @@ melo_browser_rad_io_get_list (MeloBrowser *browser, const gchar *path,
   if (!g_strcmp0 (path, "/")) {
     /* Add main categories */
     for (i = 0; i < G_N_ELEMENTS (melo_browser_rad_io_cats); i++) {
-      item = melo_browser_item_new (melo_browser_rad_io_cats[i].name,
-                                    "category");
+      item = melo_browser_item_new (melo_browser_rad_io_cats[i].id,
+                                    MELO_BROWSER_ITEM_TYPE_CATEGORY);
       if (item) {
-        item->full_name = g_strdup (melo_browser_rad_io_cats[i].full_name);
+        item->name = g_strdup (melo_browser_rad_io_cats[i].name);
         list->items = g_list_prepend (list->items, item);
       }
     }
@@ -418,7 +419,7 @@ melo_browser_rad_io_get_list (MeloBrowser *browser, const gchar *path,
       if (params->offset + params->count < len)
         len = params->offset + params->count;
       for (i = params->offset; i < len; i++) {
-        const gchar *name, *full_name;
+        const gchar *id, *name;
         JsonObject *o;
 
         /* Get object */
@@ -426,14 +427,14 @@ melo_browser_rad_io_get_list (MeloBrowser *browser, const gchar *path,
         if (!o)
           continue;
 
-        /* Get name and full_name */
-        name = json_object_get_string_member (o, "systemEnglish");
-        full_name = json_object_get_string_member (o, "localized");
+        /* Get ID and name */
+        id = json_object_get_string_member (o, "systemEnglish");
+        name = json_object_get_string_member (o, "localized");
 
         /* Create browser item */
-        item = melo_browser_item_new (name, "category");
+        item = melo_browser_item_new (id, MELO_BROWSER_ITEM_TYPE_CATEGORY);
         if (item) {
-          item->full_name = g_strdup (full_name);
+          item->name = g_strdup (name);
           list->items = g_list_prepend (list->items, item);
         }
       }
@@ -534,8 +535,9 @@ melo_browser_rad_io_get_tags (MeloBrowser *browser, const gchar *path,
 }
 
 static gboolean
-melo_browser_rad_io_play (MeloBrowser *browser, const gchar *path,
-                          const MeloBrowserPlayParams *params)
+melo_browser_rad_io_action (MeloBrowser *browser, const gchar *path,
+                            MeloBrowserItemAction action,
+                            const MeloBrowserActionParams *params)
 {
   MeloBrowserRadIo *brad = MELO_BROWSER_RAD_IO (browser);
   const gchar *stream_url = NULL;
@@ -545,6 +547,10 @@ melo_browser_rad_io_play (MeloBrowser *browser, const gchar *path,
   JsonArray *urls;
   gchar *id, *url;
   gint count, i;
+
+  /* Only support play */
+  if (action != MELO_BROWSER_ITEM_ACTION_PLAY)
+    return FALSE;
 
   /* Get radio id from path */
   id = g_path_get_basename (path);
