@@ -252,7 +252,6 @@ melo_browser_rad_io_gen_station_list (MeloBrowserRadIo *brad,
         const gchar *name;
         gchar id[10];
         JsonObject *n;
-        gint iteid;
 
         /* Get next station */
         o = json_array_get_object_element (array, i);
@@ -260,7 +259,7 @@ melo_browser_rad_io_gen_station_list (MeloBrowserRadIo *brad,
           continue;
 
         /* Get ID and name */
-        g_snprintf (id, 10, "%d", json_object_get_int_member (o, "id"));
+        g_snprintf (id, 10, "%ld", (long) json_object_get_int_member (o, "id"));
         n = json_object_get_object_member (o, "name");
         if (n)
           name = json_object_get_string_member (n, "value");
