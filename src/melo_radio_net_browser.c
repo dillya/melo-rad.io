@@ -283,6 +283,7 @@ object_cb (JsonObject *obj, MeloRequest *req)
 
     /* Init media item */
     browser__response__media_item__init (&items[i]);
+    tags__tags__init (&tags[i]);
     media_list.items[i] = &items[i];
 
     /* Get next station */
@@ -307,7 +308,6 @@ object_cb (JsonObject *obj, MeloRequest *req)
     items[i].actions = actions_ptr;
 
     /* Set tags */
-    tags__tags__init (&tags[i]);
     items[i].tags = &tags[i];
 
     /* Set cover */
@@ -345,7 +345,7 @@ list_cb (MeloHttpClient *client, JsonNode *node, void *user_data)
 
   /* Make media list response from JSON node */
   if (node) {
-    MeloMessage *msg;
+    MeloMessage *msg = NULL;
 
     /* Parse node as array or object */
     if (json_node_get_node_type (node) == JSON_NODE_ARRAY)
