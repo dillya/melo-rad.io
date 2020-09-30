@@ -15,5 +15,6 @@ shared_library(
 	'melo_radio_net',
 	src,
 	dependencies : [libmelo_dep, libmelo_proto_dep],
+	version : meson.project_version(),
 	install : true,
 	install_dir : libmelo_dep.get_pkgconfig_variable('moduledir'))
