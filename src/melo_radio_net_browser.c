@@ -91,7 +91,7 @@ melo_radio_net_browser_new ()
 {
   return g_object_new (MELO_TYPE_RADIO_NET_BROWSER, "id",
       MELO_RADIO_NET_BROWSER_ID, "name", "Radio.net", "description",
-      "Browse in Radio.net directory", "icon", "fa:broadcast-tower",
+      "Browse in Radio.net directory", "icon", MELO_RADIO_NET_BROWSER_ICON,
       "support-search", true, NULL);
 }
 
