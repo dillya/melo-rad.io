@@ -390,7 +390,7 @@ list_cb (MeloHttpClient *client, JsonNode *node, void *user_data)
   }
 
   /* Release request */
-  melo_request_unref (req);
+  melo_request_complete (req);
 }
 
 static bool
@@ -453,7 +453,7 @@ melo_radio_net_browser_get_root (MeloRequest *req)
   melo_request_send_response (req, msg);
 
   /* Release request */
-  melo_request_unref (req);
+  melo_request_complete (req);
 
   return true;
 }
@@ -655,7 +655,7 @@ action_cb (MeloHttpClient *client, JsonNode *node, void *user_data)
   }
 
   /* Release request */
-  melo_request_unref (req);
+  melo_request_complete (req);
 }
 
 static bool
