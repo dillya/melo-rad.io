@@ -198,7 +198,7 @@ array_cb (JsonArray *array, MeloRequest *req)
 static MeloMessage *
 object_cb (JsonObject *obj, MeloRequest *req)
 {
-  static Browser__Action actions[4] = {
+  static Browser__Action actions[] = {
       {
           .base = PROTOBUF_C_MESSAGE_INIT (&browser__action__descriptor),
           .type = BROWSER__ACTION__TYPE__PLAY,
@@ -224,16 +224,14 @@ object_cb (JsonObject *obj, MeloRequest *req)
           .icon = "fa:star",
       },
   };
-  static Browser__Action *set_fav_actions_ptr[3] = {
+  static Browser__Action *actions_ptr[] = {
       &actions[0],
       &actions[1],
       &actions[2],
-  };
-  static Browser__Action *unset_fav_actions_ptr[3] = {
-      &actions[0],
-      &actions[1],
       &actions[3],
   };
+  static uint32_t set_fav_actions[] = {0, 1, 2};
+  static uint32_t unset_fav_actions[] = {0, 1, 3};
   MeloRadioNetBrowserAsync *async = melo_request_get_user_data (req);
   Browser__Response resp = BROWSER__RESPONSE__INIT;
   Browser__Response__MediaList media_list = BROWSER__RESPONSE__MEDIA_LIST__INIT;
@@ -297,6 +295,10 @@ object_cb (JsonObject *obj, MeloRequest *req)
   media_list.n_items = len;
   media_list.items = items_ptr;
 
+  /* Set actions */
+  media_list.n_actions = G_N_ELEMENTS (actions_ptr);
+  media_list.actions = actions_ptr;
+
   /* Add media items */
   for (i = 0; i < len; i++) {
     const char *cover;
@@ -325,17 +327,17 @@ object_cb (JsonObject *obj, MeloRequest *req)
     /* Set media type */
     items[i].type = BROWSER__RESPONSE__MEDIA_ITEM__TYPE__MEDIA;
 
-    /* Set favorite and actions */
+    /* Set favorite and action IDs */
     id = melo_library_get_media_id_from_browser (
         MELO_RADIO_NET_BROWSER_ID, items[i].id);
     items[i].favorite =
         melo_library_media_get_flags (id) & MELO_LIBRARY_FLAG_FAVORITE;
     if (items[i].favorite) {
-      items[i].n_actions = G_N_ELEMENTS (unset_fav_actions_ptr);
-      items[i].actions = unset_fav_actions_ptr;
+      items[i].n_action_ids = G_N_ELEMENTS (unset_fav_actions);
+      items[i].action_ids = unset_fav_actions;
     } else {
-      items[i].n_actions = G_N_ELEMENTS (set_fav_actions_ptr);
-      items[i].actions = set_fav_actions_ptr;
+      items[i].n_action_ids = G_N_ELEMENTS (set_fav_actions);
+      items[i].action_ids = set_fav_actions;
     }
 
     /* Set tags */
