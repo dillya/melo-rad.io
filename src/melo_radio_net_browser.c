@@ -30,12 +30,14 @@
 
 #define RADIO_PLAYER_ID "com.sparod.radio.player"
 
-#define MELO_RADIO_NET_BROWSER_URL "https://api.radio.net/info/v2/search/"
+#define MELO_RADIO_NET_BROWSER_URL "https://prod.radio-api.net/"
 #define MELO_RADIO_NET_BROWSER_USER_AGENT "rad.io for Melo (Android API)"
 #define MELO_RADIO_NET_BROWSER_ASSET_URL \
-  "https://static.radio.net/images/broadcasts/"
+  "https://station-images.prod.radio-api.net/"
 
 typedef struct {
+  MeloRadioNetBrowser *browser;
+  char *tag;
   unsigned int offset;
   unsigned int count;
 } MeloRadioNetBrowserAsync;
@@ -44,6 +46,7 @@ struct _MeloRadioNetBrowser {
   GObject parent_instance;
 
   MeloHttpClient *client;
+  JsonNode *tags;
 };
 
 MELO_DEFINE_BROWSER (MeloRadioNetBrowser, melo_radio_net_browser)
@@ -121,7 +124,7 @@ melo_radio_net_browser_get_cover (JsonObject *obj)
 }
 
 static MeloMessage *
-array_cb (JsonArray *array, MeloRequest *req)
+category_cb (JsonObject *obj, MeloRequest *req)
 {
   MeloRadioNetBrowserAsync *async = melo_request_get_user_data (req);
   Browser__Response resp = BROWSER__RESPONSE__INIT;
@@ -129,7 +132,19 @@ array_cb (JsonArray *array, MeloRequest *req)
   Browser__Response__MediaItem **items_ptr;
   Browser__Response__MediaItem *items;
   MeloMessage *msg;
+  JsonArray *array;
   unsigned int i, count, len;
+
+  /* Check categories is available */
+  if (!json_object_has_member (obj, async->tag)) {
+    return NULL;
+  }
+
+  /* Get categories */
+  array = json_object_get_array_member (obj, async->tag);
+  if (!array || json_array_get_length (array) < 1) {
+    return NULL;
+  }
 
   /* Set response type */
   resp.resp_case = BROWSER__RESPONSE__RESP_MEDIA_LIST;
@@ -140,7 +155,6 @@ array_cb (JsonArray *array, MeloRequest *req)
 
   /* Invalid offset */
   if (async->offset >= len) {
-    free (async);
     return NULL;
   }
 
@@ -175,8 +189,8 @@ array_cb (JsonArray *array, MeloRequest *req)
       continue;
 
     /* Set media */
-    items[i].id = (char *) json_object_get_string_member (obj, "systemEnglish");
-    items[i].name = (char *) json_object_get_string_member (obj, "localized");
+    items[i].id = (char *) json_object_get_string_member (obj, "systemName");
+    items[i].name = (char *) json_object_get_string_member (obj, "name");
     items[i].type = BROWSER__RESPONSE__MEDIA_ITEM__TYPE__FOLDER;
   }
 
@@ -189,14 +203,11 @@ array_cb (JsonArray *array, MeloRequest *req)
   free (items_ptr);
   free (items);
 
-  /* Free async object */
-  free (async);
-
   return msg;
 }
 
 static MeloMessage *
-object_cb (JsonObject *obj, MeloRequest *req)
+station_cb (JsonObject *obj, MeloRequest *req)
 {
   static Browser__Action actions[] = {
       {
@@ -240,25 +251,16 @@ object_cb (JsonObject *obj, MeloRequest *req)
   Tags__Tags *tags;
   MeloMessage *msg;
   JsonArray *array;
-  unsigned int i, len, skip;
+  unsigned int i, len;
 
   /* Check categories is available */
-  if (!json_object_has_member (obj, "categories")) {
-    free (async);
+  if (!json_object_has_member (obj, "playables")) {
     return NULL;
   }
 
   /* Get categories */
-  array = json_object_get_array_member (obj, "categories");
+  array = json_object_get_array_member (obj, "playables");
   if (!array || json_array_get_length (array) < 1) {
-    free (async);
-    return NULL;
-  }
-
-  /* Get matches */
-  obj = json_array_get_object_element (array, 0);
-  if (!obj || !json_object_has_member (obj, "matches")) {
-    free (async);
     return NULL;
   }
 
@@ -266,21 +268,8 @@ object_cb (JsonObject *obj, MeloRequest *req)
   resp.resp_case = BROWSER__RESPONSE__RESP_MEDIA_LIST;
   resp.media_list = &media_list;
 
-  /* Get matches array */
-  array = json_object_get_array_member (obj, "matches");
+  /* Get array length */
   len = json_array_get_length (array);
-
-  /* Calculate skip */
-  skip = async->offset % async->count;
-  if (skip >= len) {
-    free (async);
-    return NULL;
-  }
-
-  /* Calculate final item count */
-  len -= skip;
-  if (len > async->count)
-    len = async->count;
 
   /* Set list count and offset */
   media_list.count = len;
@@ -302,7 +291,6 @@ object_cb (JsonObject *obj, MeloRequest *req)
   /* Add media items */
   for (i = 0; i < len; i++) {
     const char *cover;
-    JsonObject *o;
     uint64_t id;
 
     /* Init media item */
@@ -311,18 +299,15 @@ object_cb (JsonObject *obj, MeloRequest *req)
     media_list.items[i] = &items[i];
 
     /* Get next station */
-    obj = json_array_get_object_element (array, i + skip);
+    obj = json_array_get_object_element (array, i);
     if (!obj)
       continue;
 
     /* Set station ID */
-    items[i].id = g_strdup_printf (
-        "%lld", (long long) json_object_get_int_member (obj, "id"));
+    items[i].id = (char *) json_object_get_string_member (obj, "id");
 
     /* Set station name */
-    o = json_object_get_object_member (obj, "name");
-    if (o)
-      items[i].name = (char *) json_object_get_string_member (o, "value");
+    items[i].name = (char *) json_object_get_string_member (obj, "name");
 
     /* Set media type */
     items[i].type = BROWSER__RESPONSE__MEDIA_ITEM__TYPE__MEDIA;
@@ -359,14 +344,10 @@ object_cb (JsonObject *obj, MeloRequest *req)
   for (i = 0; i < len; i++) {
     if (tags[i].cover != protobuf_c_empty_string)
       free (tags[i].cover);
-    free (items[i].id);
   }
   free (items_ptr);
   free (items);
   free (tags);
-
-  /* Free asynchronous object */
-  free (async);
 
   return msg;
 }
@@ -378,13 +359,23 @@ list_cb (MeloHttpClient *client, JsonNode *node, void *user_data)
 
   /* Make media list response from JSON node */
   if (node) {
+    MeloRadioNetBrowserAsync *async = melo_request_get_user_data (req);
     MeloMessage *msg = NULL;
 
+    /* Save tag list */
+    if (async->tag && !async->browser->tags) {
+      async->browser->tags = json_node_ref (node);
+    }
+
     /* Parse node as array or object */
-    if (json_node_get_node_type (node) == JSON_NODE_ARRAY)
-      msg = array_cb (json_node_get_array (node), req);
-    else if (json_node_get_node_type (node) == JSON_NODE_OBJECT)
-      msg = object_cb (json_node_get_object (node), req);
+    if (async->tag)
+      msg = category_cb (json_node_get_object (node), req);
+    else
+      msg = station_cb (json_node_get_object (node), req);
+
+    /* Free async object */
+    g_free (async->tag);
+    free (async);
 
     /* Send media list response */
     if (msg)
@@ -467,7 +458,6 @@ melo_radio_net_browser_get_media_list (MeloRadioNetBrowser *browser,
   MeloRadioNetBrowserAsync *async;
   const char *query = r->query;
   char *url;
-  unsigned int page, count;
   bool search = false;
   bool ret;
 
@@ -481,6 +471,8 @@ melo_radio_net_browser_get_media_list (MeloRadioNetBrowser *browser,
     return false;
 
   /* Set async object */
+  async->browser = browser;
+  async->tag = NULL;
   async->offset = r->offset;
   async->count = r->count;
   melo_request_set_user_data (req, async);
@@ -492,13 +484,6 @@ melo_radio_net_browser_get_media_list (MeloRadioNetBrowser *browser,
   } else
     query++;
 
-  /* Calculate page index */
-  page = r->offset / r->count;
-  count = r->count;
-  if (page * r->count != r->offset)
-    count *= 2;
-  page++;
-
   /* Generate URL */
   if (!search) {
     char *q;
@@ -507,31 +492,24 @@ melo_radio_net_browser_get_media_list (MeloRadioNetBrowser *browser,
     q = strchr (query, '/');
 
     /* Generate URL */
-    if (!q || *q++ == '\0') {
+    if (!q || *q == '\0') {
+      /* Save current category */
+      async->tag = g_strdup (query);
+
+      /* Use cache */
+      if (browser->tags) {
+        list_cb (browser->client, browser->tags, req);
+        return true;
+      }
+
       /* Create category URL */
-      url = g_strdup_printf (MELO_RADIO_NET_BROWSER_URL "get%s", query);
+      url = g_strdup_printf (MELO_RADIO_NET_BROWSER_URL "stations/tags");
     } else {
-      const char *cat;
-
-      /* Get category */
-      if (g_str_has_prefix (query, "genres/"))
-        cat = "genre";
-      else if (g_str_has_prefix (query, "topics/"))
-        cat = "topic";
-      else if (g_str_has_prefix (query, "countries/"))
-        cat = "country";
-      else if (g_str_has_prefix (query, "languages/"))
-        cat = "language";
-      else if (g_str_has_prefix (query, "cities/"))
-        cat = "city";
-      else
-        return false;
-
       /* Create sub-category URL */
+      *q++ = '\0';
       url = g_strdup_printf (MELO_RADIO_NET_BROWSER_URL
-          "stationsby%s?%s=%s"
-          "&sizeperpage=%d&pageindex=%d&sorttype=STATION_NAME",
-          cat, cat, q, count, page);
+          "stations/by-tag?systemName=%s&tagType=%s&count=%d&offset=%d",
+          q, query, r->count, r->offset);
     }
   } else {
     char *q, *p;
@@ -546,9 +524,8 @@ melo_radio_net_browser_get_media_list (MeloRadioNetBrowser *browser,
 
     /* Create search URL */
     url = g_strdup_printf (MELO_RADIO_NET_BROWSER_URL
-        "stationsonly?query=%s"
-        "&sizeperpage=%d&pageindex=%d&sorttype=STATION_NAME",
-        q, count, page);
+        "stations/search?query=%s&count=%d&offset=%d",
+        q, r->count, r->offset);
     g_free (q);
   }
 
@@ -569,10 +546,17 @@ action_cb (MeloHttpClient *client, JsonNode *node, void *user_data)
   /* Extract radio URL from JSON node */
   if (node) {
     Browser__Action__Type type;
-    JsonObject *obj;
+    JsonObject *obj = NULL;
+    JsonArray *array;
+
+    /* Get array */
+    array = json_node_get_array (node);
+    if (array) {
+      /* Get first item */
+      obj = json_array_get_object_element (array, 0);
+    }
 
     /* Get object */
-    obj = json_node_get_object (node);
     if (obj) {
       const char *name, *url = NULL, *cover;
       unsigned int i, count;
@@ -583,18 +567,18 @@ action_cb (MeloHttpClient *client, JsonNode *node, void *user_data)
       name = json_object_get_string_member (obj, "name");
 
       /* Get station URL */
-      urls = json_object_get_array_member (obj, "streamUrls");
+      urls = json_object_get_array_member (obj, "streams");
       count = json_array_get_length (urls);
       for (i = 0; i < count; i++) {
         JsonObject *o;
 
         /* Get next object */
         o = json_array_get_object_element (urls, i);
-        if (!o || !json_object_has_member (o, "streamUrl"))
+        if (!o || !json_object_has_member (o, "url"))
           continue;
 
         /* Get URL */
-        url = json_object_get_string_member (o, "streamUrl");
+        url = json_object_get_string_member (o, "url");
         break;
       }
 
@@ -603,14 +587,10 @@ action_cb (MeloHttpClient *client, JsonNode *node, void *user_data)
       if (cover) {
         tags = melo_tags_new ();
         if (tags) {
-          char id[21];
-
-          snprintf (id, sizeof (id), "%lld",
-              (long long) json_object_get_int_member (obj, "id"));
-
           melo_tags_set_cover (tags, melo_request_get_object (req), cover);
           melo_tags_set_browser (tags, MELO_RADIO_NET_BROWSER_ID);
-          melo_tags_set_media_id (tags, id);
+          melo_tags_set_media_id (
+              tags, (char *) json_object_get_string_member (obj, "id"));
         }
       }
 
@@ -691,7 +671,8 @@ melo_radio_net_browser_do_action (MeloRadioNetBrowser *browser,
   melo_request_set_user_data (req, (void *) r->type);
 
   /* Generate URL from path */
-  url = g_strdup_printf (MELO_RADIO_NET_BROWSER_URL "station?station=%s", id);
+  url = g_strdup_printf (
+      MELO_RADIO_NET_BROWSER_URL "stations/details?stationIds=%s", id);
 
   /* Get radio URL from sparod */
   ret = melo_http_client_get_json (browser->client, url, action_cb, req);
